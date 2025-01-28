@@ -1,99 +1,108 @@
-function main() {
+function mainAluguel() {
   const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
-  let bill_type = "Aluguel";
-  let sender = env_data[bill_type]["sender"];
-  let subject = env_data[bill_type]["subject"];
-  let period = env_data[bill_type]["period"];
-  let folder_id = env_data[bill_type]["folder_id"];
-  findBill(bill_type, sender, subject , period, folder_id);
+  const bill_type = "Aluguel";
+  const {
+    sender,
+    subject,
+    period,
+    folder_id,
+    spreadsheet_id,
+    tab_name
+  } = env_data[bill_type];
+
+  let bill_data = Aluguel.findBill(bill_type, sender, subject, period, folder_id);
+  if (bill_data) {
+    const file_id = Aluguel.saveBill(folder_id, bill_data.file_name, bill_data.message);
+    if (file_id) {
+      bill_data["file_id"] = file_id;
+      append_data_to_spreadsheet(spreadsheet_id, tab_name, bill_data);
+    }
+  }
 }
 
-function findBill(bill_type, sender, subject , period, folder_id) {
-  let threads = GmailApp.search(`from:${sender} subject:${subject} newer_than:${period}`);
+const Aluguel = {
 
-  if (threads.length > 0) {
-    let messages = threads[0].getMessages();
-    let message = messages[messages.length - 1]; // Pega a última mensagem no thread
-    
-    Logger.log("Email encontrado em " + message.getDate() + "!");
-    
-    let ref_month = message.getDate().getMonth() + 1;
-    let ref_year = message.getDate().getFullYear();
-    let value = get_value(message.getPlainBody());
-    let dead_line = get_dead_line(message.getPlainBody()); // DD/MM/YYYY
-    let bar_code = get_bar_code(message.getPlainBody());
-    let file_name = `${ref_year}_${ref_month}_Boleto_${bill_type}.pdf`;
+  findBill: function(bill_type, sender, subject , period) {
+    let threads = GmailApp.search(`from:${sender} subject:${subject} newer_than:${period}`);
 
-    Logger.log("File_name: " + file_name);
+    if (threads.length > 0) {
+      let messages = threads[0].getMessages();
+      let message = messages[messages.length - 1]; // Pega a última mensagem no thread
+      
+      Logger.log("Email encontrado em " + message.getDate() + "!");
+      
+      let ref_month = message.getDate().getMonth() + 1;
+      let ref_year = message.getDate().getFullYear();
+      let value = Aluguel.get_value(message.getPlainBody());
+      let dead_line = Aluguel.get_dead_line(message.getPlainBody()); // DD/MM/YYYY
+      let bar_code = Aluguel.get_bar_code(message.getPlainBody());
+      let file_name = `${ref_year}_${ref_month.toString().padStart(2, '0')}_Boleto_${bill_type}.pdf`;
+      
+      let bill = {
+        "message" : message,
+        "year" : ref_year,
+        "month" : ref_month,
+        "bill_type" : bill_type,
+        "value" : value,
+        "dead_line" : dead_line,
+        "bar_code" : bar_code,
+        "file_name" : file_name
+      };
+      return bill;
+    } else {
+      Logger.log("Email não encontrado!")
+      return null;
+    }  
+  },
 
+  saveBill: function(folder_id, file_name, message) {
     if (!is_file_in_folder(file_name, folder_id)) {
-      let attachments = message.getAttachments();
-      if (attachments.length !== 0) {
-        for (let attachment of attachments) {
-          if (attachment.getContentType() === 'application/pdf') { // Pega o primeiro pdf em anexo
-            attachment.setName(file_name);
-            let folder = DriveApp.getFolderById(folder_id);
-            folder.createFile(attachment);
-            break
-          }
-        }
-      } else if (bill_type === "Aluguel") {
-        let file_link = get_file_link(message.getBody());
-        let response = UrlFetchApp.fetch(file_link);
-        let blob = response.getBlob();
-        let folder = DriveApp.getFolderById(folder_id);
-        folder.createFile(blob.setName(file_name));
-      }
+      let file_link = Aluguel.get_file_link(message.getBody());
+      let response = UrlFetchApp.fetch(file_link);
+      let blob = response.getBlob();
+      let folder = DriveApp.getFolderById(folder_id);
+      let file = folder.createFile(blob.setName(file_name));
+      Logger.log(`PDF ${file_name} salvo com sucesso!`)
+      const file_id = file.getId();
+      return file_id;
     } else {
       Logger.log(`PDF ${file_name} já existe na pasta!`)
+      return null;
     }
-    
-  } else {
-    Logger.log("Email não encontrado!")
-  }  
-}
+  },
 
-function get_value(plainBody) {
-  let regex = /^Valor:.*$/gm;
-  let matches = plainBody.match(regex);
-  let match = matches ? matches[0] : null;
-  let value = match ? Number(match.replace("Valor:", "").replace(/\s+/g, "").replaceAll(".", "").replace(",", ".")) : null;
-  Logger.log("Value: " + value)
-  return value;
-}
+  get_value: function(plainBody) {
+    let regex = /^Valor:.*$/gm;
+    let matches = plainBody.match(regex);
+    let match = matches ? matches[0] : null;
+    let value = match ? Number(match.replace("Valor:", "").replace(/\s+/g, "").replaceAll(".", "").replace(",", ".")) : null;
+    Logger.log("Value: " + value)
+    return value;
+  },
 
-function get_dead_line(plainBody) {
-  let regex = /^Vencimento:.*$/gm;
-  let matches = plainBody.match(regex);
-  let match = matches ? matches[0] : null;
-  let date = match ? match.replaceAll("Vencimento:", "").replaceAll(" ", "") : null ;
-  Logger.log("Deadline: " + date)
-  return date;
-}
+  get_dead_line: function(plainBody) {
+    let regex = /^Vencimento:.*$/gm;
+    let matches = plainBody.match(regex);
+    let match = matches ? matches[0] : null;
+    let date = match ? match.replaceAll("Vencimento:", "").replaceAll(" ", "") : null ;
+    Logger.log("Deadline: " + date)
+    return date;
+  },
 
-function get_bar_code(plainBody) {
-  let regex = /^\d*\s$/gm;
-  let matches = plainBody.match(regex);
-  let match = matches ? matches[0] : null;
-  let bar_code = match ? match.replace(/\s+/g, "") : null;
-  Logger.log("Bar_code: " + bar_code)
-  return bar_code;
-}
+  get_bar_code: function(plainBody) {
+    let regex = /\d{30,}/gm;
+    let matches = plainBody.match(regex);
+    let match = matches ? matches[0] : null;
+    let bar_code = match ? match.replace(/\s+/g, "") : null;
+    Logger.log("Bar_code: " + bar_code)
+    return bar_code;
+  },
 
-function is_file_in_folder(file_name, folder_id) {
-  var folder = DriveApp.getFolderById(folder_id);
-  var files_list = []
-  files = folder.getFiles();
-  while(files.hasNext()) {
-    files_list.push(files.next().getName())
+  get_file_link: function(body) {
+    let regex = /href="([^"]+)"\starget/;
+    let results = body.match(regex);
+    let result_group = results ? results[1] : null;
+    Logger.log("File_link: " + result_group);
+    return result_group;
   }
-  return files_list.includes(file_name);
-}
-
-function get_file_link(body) {
-  let regex = /href="([^"]+)"\starget/;
-  let results = body.match(regex);
-  let result_group = results ? results[1] : null;
-  Logger.log("File_link: " + result_group);
-  return result_group;
 }
