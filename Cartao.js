@@ -17,7 +17,6 @@ const Cartao = {
       var message = messages[messages.length - 1]; // Pega a última mensagem no thread
       
       Logger.log("Email encontrado em " + message.getDate() + "!");
-      Logger.log(message.getPlainBody())
       
       var attachments = message.getAttachments();
       var attachment = attachments[0]; // Pega o primeiro anexo
