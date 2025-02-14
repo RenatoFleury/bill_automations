@@ -35,24 +35,7 @@ function append_data_to_spreadsheet(spreadsheet_id, tab_name, bill_data) {
   Logger.log("Conta adicionada à planilha!")
 }
 
-function invoke_gc_function() {
-  const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
-  const CLOUD_RUN_URL = env_data["Google Cloud"]["CLOUD_RUN_URL"]
-  
-  // Use the OpenID token inside App Scripts
-  const token = ScriptApp.getIdentityToken();
-  var options = {
-    'method' : 'get',
-    'headers': {'Authorization': 'Bearer ' + token},
-  };
-  // call the server
-  var response = UrlFetchApp.fetch(CLOUD_RUN_URL + '/unlock_pdf' + '?name=Renato', options);
-
-  Logger.log(response)
-}
-
 function unlockPdf(attachment, password, file_name) {
-
   let blob = attachment.copyBlob(); // Get the attachment as a Blob
   let bytes = blob.getBytes();       // Get the binary data as bytes
   let pdfBase64 = Utilities.base64Encode(bytes); // Encode to base64
@@ -82,7 +65,6 @@ function unlockPdf(attachment, password, file_name) {
     const decodedPdf = Utilities.base64Decode(unlockedPdfBase64);
     const blob_unlockedPdf = Utilities.newBlob(decodedPdf, "application/pdf", file_name);
     return blob_unlockedPdf;
-
   }
 }
 
