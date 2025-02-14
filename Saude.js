@@ -7,12 +7,13 @@ function mainSaude() {
     period,
     folder_id,
     spreadsheet_id,
-    tab_name
+    tab_name,
+    pdf_password
   } = env_data[bill_type];
 
   let bill_data = Saude.findBill(bill_type, sender, subject, period, folder_id);
   if (bill_data) {
-    const file_id = Saude.saveBill(folder_id, bill_data.file_name, bill_data.message);
+    const file_id = Saude.saveBill(folder_id, bill_data.file_name, bill_data.message, pdf_password);
     if (file_id) {
       bill_data["file_id"] = file_id;
       append_data_to_spreadsheet(spreadsheet_id, tab_name, bill_data);
@@ -30,7 +31,6 @@ const Saude = {
       Logger.log("Email encontrado em " + message.getDate() + "!");
       
       let plainBody = message.getPlainBody()
-      Logger.log(plainBody);
       let ref_month = message.getDate().getMonth() + 1;
       let ref_year = message.getDate().getFullYear();
       let value = Saude.get_value(plainBody);
@@ -54,15 +54,15 @@ const Saude = {
     }  
   },
 
-  saveBill: function(folder_id, file_name, message) {
+  saveBill: function(folder_id, file_name, message, pdf_password) {
     if (!is_file_in_folder(file_name, folder_id)) {
       let attachments = message.getAttachments();
       const allowedTypes = ['application/pdf', 'application/octet-stream'];
       for (let attachment of attachments) {
         if (allowedTypes.includes(attachment.getContentType())) {
-          attachment.setName(file_name);
+          let blob_unlocked_pdf = unlockPdf(attachment, pdf_password, file_name)
           let folder = DriveApp.getFolderById(folder_id);
-          let file = folder.createFile(attachment);
+          let file = folder.createFile(blob_unlocked_pdf);
           Logger.log(`PDF ${file_name} salvo com sucesso!`)
           const file_id = file.getId();
           return file_id;
