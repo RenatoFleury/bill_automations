@@ -35,24 +35,7 @@ function append_data_to_spreadsheet(spreadsheet_id, tab_name, bill_data) {
   Logger.log("Conta adicionada à planilha!")
 }
 
-function invoke_gc_function() {
-  const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
-  const CLOUD_RUN_URL = env_data["Google Cloud"]["CLOUD_RUN_URL"]
-  
-  // Use the OpenID token inside App Scripts
-  const token = ScriptApp.getIdentityToken();
-  var options = {
-    'method' : 'get',
-    'headers': {'Authorization': 'Bearer ' + token},
-  };
-  // call the server
-  var response = UrlFetchApp.fetch(CLOUD_RUN_URL + '/unlock_pdf' + '?name=Renato', options);
-
-  Logger.log(response)
-}
-
 function unlockPdf(attachment, password, file_name) {
-
   let blob = attachment.copyBlob(); // Get the attachment as a Blob
   let bytes = blob.getBytes();       // Get the binary data as bytes
   let pdfBase64 = Utilities.base64Encode(bytes); // Encode to base64
@@ -82,7 +65,96 @@ function unlockPdf(attachment, password, file_name) {
     const decodedPdf = Utilities.base64Decode(unlockedPdfBase64);
     const blob_unlockedPdf = Utilities.newBlob(decodedPdf, "application/pdf", file_name);
     return blob_unlockedPdf;
-
   }
 }
 
+
+function getFileByNameInFolder(fileName, folderId) {
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const searchQuery = `title = '${fileName}' and '${folderId}' in parents and trashed = false`;
+    const files = folder.searchFiles(searchQuery);
+    if (files.hasNext()) {
+      return files.next();
+    } else {
+      return null;
+    }
+  } catch (e) {
+    Logger.log("Error: " + e.toString());
+    return null; // Return null in case of an error.
+  }
+}
+
+function call_gemini(query, data_mime_type, data_base64) {
+  const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
+  const base_url = env_data["Google Cloud"]["GEMINI_URL"];
+  const api_key = env_data["Google Cloud"]["GEMINI_API_KEY"];
+  const model = "/gemini-2.0-flash";
+  const url = base_url + model + ":generateContent" + "?key=" + api_key;
+
+  const payload = {
+    "contents": [{
+      "parts":[
+        {"text": query},{
+        "inline_data": {
+          "mime_type": data_mime_type,
+          "data": data_base64
+        }
+      }
+        ]
+    }],
+    "generationConfig": {
+        "response_mime_type": "application/json",
+        "response_schema": {
+          "type": "ARRAY",
+          "items": {
+            "type": "OBJECT",
+            "properties": {
+              "day": {"type":"NUMBER"},
+              "month" : {"type":"NUMBER"},
+              "stablishment" : {"type":"STRING"},
+              "value" : {"type":"NUMBER"}
+            }
+          }
+        }
+    }
+  };
+
+  const options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    // Convert the JavaScript object to a JSON string
+    'payload': JSON.stringify(payload),
+    'muteHttpExceptions': true // Important for error handling
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  // Parse the JSON response (if the response code is successful)
+  if (responseCode >= 200 && responseCode < 300) {
+    const jsonResponse = JSON.parse(responseText);
+    const response = jsonResponse.candidates[0].content.parts[0].text
+    return response
+  } else {
+    Logger.log("Error: API request failed. Check the response code and text for details.");
+    Logger.log("Response Code: " + responseCode);
+    Logger.log("Response Text: " + responseText)
+    return null
+  }
+}
+
+function test_gemini_with_file() {
+  const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
+  const folder_id = env_data["Cartao"]["folder_id"];
+  const file_name = "Nubank_2025-02-08.pdf";
+
+  const file = getFileByNameInFolder(file_name, folder_id);
+  const bytes = file.getBlob().getBytes();
+  const data_base64 = Utilities.base64Encode(bytes);
+  const data_mime_type = "application/pdf"
+  const query = "Get all the transactions in the pdf. Give me the answer with day, month, stablishment and value.";
+  const response = call_gemini(query, data_mime_type, data_base64);
+  Logger.log(`Response : ${response}`);
+}
