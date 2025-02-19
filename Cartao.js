@@ -7,18 +7,21 @@ function mainCartao() {
   let folder_id = env_data[bill_type]["folder_id"];
   let spreadsheet_id = env_data[bill_type]["spreadsheet_id"];
   let tab_name_card = env_data[bill_type]["tab_card"];
-  
-  // let attachment = Cartao.findBill(bill_type, sender, subject , period, folder_id);
-  
+
   const card = new Card()
   const attachment = card.findBill(sender,subject,period);
   if (card.saveBill(attachment, folder_id)) {
-    const bill_data_string = card.getBillData(attachment);
+    let bill_data_string = card.getBillData(attachment);
     card.appendDataToSheets(bill_data_string, spreadsheet_id, tab_name_card);
   }
+  return card.logs
 }
 
 class Card {
+  constructor() {
+    this.logs = [];
+  }
+
   findBill(sender, subject , period) {
     let threads = GmailApp.search(`from:${sender} subject:${subject} newer_than:${period}`);
 
@@ -26,16 +29,16 @@ class Card {
       let messages = threads[0].getMessages();
       let message = messages[messages.length - 1]; // Pega a última mensagem no thread
       
-      Logger.log("Email encontrado em " + message.getDate() + "!");
+      this.add_log("Email encontrado em " + message.getDate() + "!");
       
       let attachments = message.getAttachments();
       let attachment = attachments[0]; // Pega o primeiro anexo
       let attachment_name = attachment.getName()
       
-      Logger.log(`PDF ${attachment_name} encontrado!`);
+      this.add_log(`PDF ${attachment_name} encontrado!`);
       return attachment;
     } else {
-      Logger.log("Email não encontrado!")
+      this.add_log("Email não encontrado!")
       return null;
     } 
   }
@@ -45,25 +48,42 @@ class Card {
     const folder = DriveApp.getFolderById(folder_id);
     
     if (is_file_in_folder(attachment_name, folder_id)) {
-      Logger.log(`PDF ${attachment_name} já existe na pasta!`)
+      this.add_log(`PDF ${attachment_name} já existe na pasta!`)
       return false;
     } else {
       if (attachment.getContentType() === 'application/pdf') {
         const file = folder.createFile(attachment);
-        Logger.log(`Fatura salva como: ${attachment_name}`);
+        this.add_log(`Fatura salva como: ${attachment_name}`);
+        return true;
       } else {
-        Logger.log(`attachment isn't of type 'application/pdf'`);
+        this.add_log(`attachment isn't of type 'application/pdf'`);
+        return false;
       }
     }
   }
 
-  getBillData(attachment) {
+   getBillData(attachment) {
     let blob = attachment.copyBlob();
     let bytes = blob.getBytes();
     const data_base64 = Utilities.base64Encode(bytes);
     const data_mime_type = "application/pdf"
     const query = "Get all the transactions in the pdf. Give me the answer with day, month, stablishment and value.";
-    let bill_data = call_gemini(query, data_mime_type, data_base64);
+    const generationConfig = {
+      "response_mime_type": "application/json",
+      "response_schema": {
+        "type": "ARRAY",
+        "items": {
+          "type": "OBJECT",
+          "properties": {
+            "day": {"type":"NUMBER"},
+            "month" : {"type":"NUMBER"},
+            "stablishment" : {"type":"STRING"},
+            "value" : {"type":"NUMBER"}
+          }
+        }
+      }
+    }
+    let bill_data = call_gemini(query, data_mime_type, data_base64, generationConfig);
     
     return bill_data
   }
@@ -74,7 +94,7 @@ class Card {
       const spreadsheet = SpreadsheetApp.openById(spreadsheet_id);
       let sheet = spreadsheet.getSheetByName(tab_name);
       if (!sheet) {
-        Logger.log(`The tab ${tab_name} doesn't exist.`)
+        this.add_log(`The tab ${tab_name} doesn't exist.`)
       }
 
       // Prepare the data rows.
@@ -88,62 +108,17 @@ class Card {
         sheet.getRange(sheet.getLastRow() + 1, 1, dataRows.length, headers.length).setValues(dataRows);
       }
 
-      Logger.log("Data appended to sheet: " + tab_name);
+      this.add_log("Data appended to sheet: " + tab_name);
 
     } catch (e) {
-      Logger.log("Error: " + e.toString());
-      Logger.log("Stack Trace: " + e.stack); // Add stack trace for better debugging
+      this.add_log("Error: " + e.toString());
+      this.add_log("Stack Trace: " + e.stack); // Add stack trace for better debugging
       throw e;
     }
   }
-}
 
-
-
-
-
-
-
-
-
-
-
-const Cartao = {
-  findBill: function(bill_type, sender, subject , period, folder_id) {
-    let threads = GmailApp.search(`from:${sender} subject:${subject} newer_than:${period}`);
-
-    if (threads.length > 0) {
-      var messages = threads[0].getMessages();
-      var message = messages[messages.length - 1]; // Pega a última mensagem no thread
-      
-      Logger.log("Email encontrado em " + message.getDate() + "!");
-      
-      var attachments = message.getAttachments();
-      var attachment = attachments[0]; // Pega o primeiro anexo
-      var invoice = attachment.getName()
-      
-      Logger.log(`PDF ${invoice} encontrado!`);
-
-      const folder = DriveApp.getFolderById(folder_id);
-      let files_list = []
-      files = folder.getFiles();
-      while(files.hasNext()) {
-        files_list.push(files.next().getName())
-      }
-
-      if (files_list.includes(invoice)) {
-        Logger.log(`PDF ${invoice} já existe na pasta!`)
-        return null;
-      } else {
-        if (attachment.getContentType() === 'application/pdf') {
-            const file = folder.createFile(attachment);
-            Logger.log(`Fatura salva como: ${invoice}`);
-            return attachment;
-        }
-      }
-    } else {
-      Logger.log("Email não encontrado!")
-      return null;
-    }  
+  add_log(message) {
+    this.logs.push(message);
+    Logger.log(message);
   }
 }

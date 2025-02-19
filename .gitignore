@@ -1,2 +1,4 @@
 .env.html
 .clasp.json
+.clasprc.json
+creds.json

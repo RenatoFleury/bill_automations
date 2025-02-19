@@ -85,7 +85,7 @@ function getFileByNameInFolder(fileName, folderId) {
   }
 }
 
-function call_gemini(query, data_mime_type, data_base64) {
+function call_gemini(query, data_mime_type, data_base64, generationConfig) {
   const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
   const base_url = env_data["Google Cloud"]["GEMINI_URL"];
   const api_key = env_data["Google Cloud"]["GEMINI_API_KEY"];
@@ -103,21 +103,7 @@ function call_gemini(query, data_mime_type, data_base64) {
       }
         ]
     }],
-    "generationConfig": {
-        "response_mime_type": "application/json",
-        "response_schema": {
-          "type": "ARRAY",
-          "items": {
-            "type": "OBJECT",
-            "properties": {
-              "day": {"type":"NUMBER"},
-              "month" : {"type":"NUMBER"},
-              "stablishment" : {"type":"STRING"},
-              "value" : {"type":"NUMBER"}
-            }
-          }
-        }
-    }
+    "generationConfig": generationConfig
   };
 
   const options = {
@@ -155,6 +141,22 @@ function test_gemini_with_file() {
   const data_base64 = Utilities.base64Encode(bytes);
   const data_mime_type = "application/pdf"
   const query = "Get all the transactions in the pdf. Give me the answer with day, month, stablishment and value.";
-  const response = call_gemini(query, data_mime_type, data_base64);
+  const generationConfig = {
+    "response_mime_type": "application/json",
+    "response_schema": {
+      "type": "ARRAY",
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "day": {"type":"NUMBER"},
+          "month" : {"type":"NUMBER"},
+          "stablishment" : {"type":"STRING"},
+          "value" : {"type":"NUMBER"}
+        }
+      }
+    }
+  }
+  const response = call_gemini(query, data_mime_type, data_base64, generationConfig);
   Logger.log(`Response : ${response}`);
+  return response
 }
