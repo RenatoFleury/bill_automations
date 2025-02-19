@@ -11,94 +11,97 @@ function mainSaude() {
     pdf_password
   } = env_data[bill_type];
 
-  let bill_data = Saude.findBill(bill_type, sender, subject, period, folder_id);
-  if (bill_data) {
-    const file_id = Saude.saveBill(folder_id, bill_data.file_name, bill_data.message, pdf_password);
-    if (file_id) {
-      bill_data["file_id"] = file_id;
-      append_data_to_spreadsheet(spreadsheet_id, tab_name, bill_data);
+  let health = new Health(sender, subject, period, folder_id, spreadsheet_id, tab_name, pdf_password);
+  let pdf_blob = health.findBill();
+  if (pdf_blob) {
+    let bill_data = health.processBill(pdf_blob);
+    if (bill_data) {
+      health.saveBill(pdf_blob, bill_data);
     }
   }
+  return health.logs;
 }
 
-const Saude = {
+class Health {
+  constructor(sender, subject, period, folder_id, spreadsheet_id, tab_name, pdf_password) {
+    this.sender = sender;
+    this.subject = subject;
+    this.period = period;
+    this.folder_id = folder_id;
+    this.spreadsheet_id = spreadsheet_id;
+    this.tab_name = tab_name;
+    this.pdf_password = pdf_password;
+    this.bill_type = "Saude";
+    this.file_name = "";
+    this.logs = [];
+  }
 
-  findBill: function(bill_type, sender, subject , period) {
-    var threads = GmailApp.search(`from:${sender} subject:${subject} newer_than:${period}`);
+  add_log(message) {
+    this.logs.push(message);
+    Logger.log(message);
+  }
+
+  findBill() {
+    let threads = GmailApp.search(`from:${this.sender} subject:${this.subject} newer_than:${this.period}`);
     if (threads.length > 0) {
       let messages = threads[0].getMessages();
       let message = messages[messages.length - 1]; // Pega a última mensagem no thread
-      Logger.log("Email encontrado em " + message.getDate() + "!");
-      
-      let plainBody = message.getPlainBody()
+      this.add_log("Email encontrado em " + message.getDate() + "!");
+      let attachments = message.getAttachments();
       let ref_month = message.getDate().getMonth() + 1;
       let ref_year = message.getDate().getFullYear();
-      let value = Saude.get_value(plainBody);
-      let dead_line = Saude.get_dead_line(plainBody); // DD/MM/YYYY
-      let bar_code = Saude.get_bar_code(plainBody);
-      let file_name = `${ref_year}_${ref_month.toString().padStart(2, '0')}_Boleto_${bill_type}.pdf`;
-      let bill = {
-        "message" : message,
-        "year" : ref_year,
-        "month" : ref_month,
-        "bill_type" : bill_type,
-        "value" : value,
-        "dead_line" : dead_line,
-        "bar_code" : bar_code,
-        "file_name" : file_name
-      };
-      return bill;
-    } else {
-      Logger.log("Email não encontrado!")
-      return null;
-    }  
-  },
-
-  saveBill: function(folder_id, file_name, message, pdf_password) {
-    if (!is_file_in_folder(file_name, folder_id)) {
-      let attachments = message.getAttachments();
-      const allowedTypes = ['application/pdf', 'application/octet-stream'];
-      for (let attachment of attachments) {
-        if (allowedTypes.includes(attachment.getContentType())) {
-          let blob_unlocked_pdf = unlockPdf(attachment, pdf_password, file_name)
-          let folder = DriveApp.getFolderById(folder_id);
-          let file = folder.createFile(blob_unlocked_pdf);
-          Logger.log(`PDF ${file_name} salvo com sucesso!`)
-          const file_id = file.getId();
-          return file_id;
+      this.file_name = `${ref_year}_${ref_month.toString().padStart(2, '0')}_Boleto_${this.bill_type}.pdf`;
+      if (is_file_in_folder(this.file_name, this.folder_id)) {
+        this.add_log(`PDF ${this.file_name} já foi catalogado!`)
+        return null;
+      } else {
+        const allowedTypes = ['application/pdf', 'application/octet-stream'];
+        for (let attachment of attachments) {
+          if (allowedTypes.includes(attachment.getContentType())) {
+            let blob_unlocked_pdf = unlockPdf(attachment, this.pdf_password, this.file_name);
+            return blob_unlocked_pdf;
+          }
         }
       }
     } else {
-      Logger.log(`PDF ${file_name} já existe na pasta!`)
+      this.add_log("Email não encontrado!")
       return null;
     }
-  },
+  }
 
-  get_value: function(plainBody) {
-    let regex = /R\$\s\d*,\d*/gm;
-    let matches = plainBody.match(regex);
-    let match = matches ? matches[0] : null;
-    let value = match ? Number(match.replace("R$", "").replace(/\s+/g, "").replace(",", ".")) : null;
-    Logger.log("Value: " + value)
-    return value;
-  },
+  processBill(pdf_blob) {
+    const bytes = pdf_blob.getBytes();
+    const data_base64 = Utilities.base64Encode(bytes);
+    const data_mime_type = "application/pdf"
+    const query = "No arquivo enviado me forneça o ano, mês e valor da conta, como também a data de vencimento e o código de barras. (Ano e Mês são referentes ao campo 'Data do Documento') Utilize o seguinte JSON schema para a resposta: { year: Number, month: Number, value: Number, dead_line: String com / como separador, bar_code: String }";
+    const generationConfig = {
+      "response_mime_type": "application/json",
+      "temperature": 0.0
+    }
+    const response = call_gemini(query, data_mime_type, data_base64, generationConfig);
+    if (response) {
+      this.add_log(`Bill data: ${response}`);
+      const bill_data = JSON.parse(response);
+      return bill_data;
+    } else {
+      this.add_log("Erro ao processar o boleto!")
+      return null;
+    }
+  }
 
-  get_dead_line: function(plainBody) {
-    
-    let regex = /\d{2}\/\d{2}\/\d{4}/gm;
-    let matches = plainBody.match(regex);
-    let match = matches ? matches[0] : null;
-    let dead_line = match ? match.replaceAll(".", "/") : null ;
-    Logger.log("dead_line: " + dead_line)
-    return dead_line;
-  },
-
-  get_bar_code: function(plainBody) {
-    let regex = /\d{30,}/gm;
-    let matches = plainBody.match(regex);
-    let match = matches ? matches[0] : null;
-    let bar_code = match ? match.replace(/\s+/g, "") : null;
-    Logger.log("Bar_code: " + bar_code)
-    return bar_code;
+  saveBill(pdf_blob, bill_data) {
+    try {
+      let folder = DriveApp.getFolderById(this.folder_id);
+      let file = folder.createFile(pdf_blob);
+      this.add_log(`PDF ${this.file_name} salvo com sucesso!`)
+      bill_data["bill_type"] = this.bill_type;
+      bill_data["file_id"] = file.getId();
+      bill_data["file_name"] = this.file_name;
+      append_data_to_spreadsheet(this.spreadsheet_id, this.tab_name, bill_data);
+      this.add_log(`Dados do boleto salvos na planilha!`)
+    } catch (e) {
+      this.add_log(`Erro ao salvar o boleto: ${e}`)
+      throw new Error(e);
+    }
   }
 }

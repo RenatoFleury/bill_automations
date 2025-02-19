@@ -32,7 +32,6 @@ function append_data_to_spreadsheet(spreadsheet_id, tab_name, bill_data) {
   sheet.getRange(startRow, startColumn, 1, data.length).setValues([data]);
   sheet.getRange(startRow, startColumn + data.length).setFormula('=HYPERLINK("' + file_url + '"; "' + bill_data.file_name + '")');
   sheet.getRange(startRow, startColumn + data.length + 1).setValue("Pendente");
-  Logger.log("Conta adicionada à planilha!")
 }
 
 function unlockPdf(attachment, password, file_name) {
@@ -131,7 +130,7 @@ function call_gemini(query, data_mime_type, data_base64, generationConfig) {
   }
 }
 
-function test_gemini_with_file() {
+function test_gemini_with_invoice() {
   const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
   const folder_id = env_data["Cartao"]["folder_id"];
   const file_name = "Nubank_2025-02-08.pdf";
@@ -155,6 +154,24 @@ function test_gemini_with_file() {
         }
       }
     }
+  }
+  const response = call_gemini(query, data_mime_type, data_base64, generationConfig);
+  Logger.log(`Response : ${response}`);
+  return response
+}
+
+function test_gemini_with_bill() {
+  const env_data = JSON.parse(HtmlService.createHtmlOutputFromFile(".env.html").getContent());
+  const folder_id = env_data["Energia"]["folder_id"];
+  const file_name = "2025_01_Boleto_Gas.pdf";
+
+  const file = getFileByNameInFolder(file_name, folder_id);
+  const bytes = file.getBlob().getBytes();
+  const data_base64 = Utilities.base64Encode(bytes);
+  const data_mime_type = "application/pdf"
+  const query = "No arquivo enviado me forneça o ano, mês e valor da conta, como também a data de vencimento e o código de barras. Utilize o seguinte JSON schema para a resposta: { year: Number, month: Number, value: Number, dead_line: String com / como separador, bar_code: String }";
+  const generationConfig = {
+    "response_mime_type": "application/json"
   }
   const response = call_gemini(query, data_mime_type, data_base64, generationConfig);
   Logger.log(`Response : ${response}`);
